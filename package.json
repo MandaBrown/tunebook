@@ -1,0 +1,15 @@
+{
+  "name": "tunebook-scripts",
+  "type": "module",
+  "dependencies": {
+    "abcjs": "^6.4.4",
+    "gray-matter": "^4.0.3",
+    "pdf-lib": "^1.17.1",
+    "puppeteer": "^24.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.0.0"
+  }
+}
