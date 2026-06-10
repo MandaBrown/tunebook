@@ -9,6 +9,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import { spawnSync } from "child_process";
 import matter from "gray-matter";
 
 import {
@@ -50,6 +51,10 @@ Options:
   --chords             Print a chord chart below each tune that has chords
   --chords-only        Print only chord charts (title/composer/key, no staff);
                        tunes without chords are skipped
+  --type TYPE          Only include tunes whose Type is TYPE (repeatable; "none" = untyped)
+  --exclude-type TYPE  Exclude tunes whose Type is TYPE (repeatable; "none" = untyped)
+  --by-type            Emit one book per type family (Reels, Jigs, Marches &
+                       Waltzes, Other, Untyped) instead of a single combined book
   -h, --help           Show this help message
 
 Tip:
@@ -75,7 +80,43 @@ const includeAuthorIndex = !args.includes("--no-author-index");
 const chordsOnly         = args.includes("--chords-only");
 const includeChords      = chordsOnly || args.includes("--chords");
 
+// Type filters (the Type frontmatter field; "none" matches untyped tunes).
+const byType       = args.includes("--by-type");
+const typeFilters: string[] = [];
+const excludeTypes: string[] = [];
+for (let i = 0; i < args.length; i++) {
+  if      (args[i] === "--type"         && args[i + 1]) typeFilters.push(args[++i]);
+  else if (args[i] === "--exclude-type" && args[i + 1]) excludeTypes.push(args[++i]);
+}
+
 const outputPath = optOutput ?? path.join(OUTPUT_DIR, `${title}.pdf`);
+
+// ── Split-by-type mode ────────────────────────────────────────────────────────
+// Re-runs this script once per type family (a normal single-book run each),
+// instead of emitting one giant book. Other options (--chords, etc.) pass
+// through; --title becomes the volume title and --output is dropped.
+if (byType) {
+  const families: { name: string; filter: string[] }[] = [
+    { name: "Reels",             filter: ["--type", "Reel", "--type", "Slow Reel", "--type", "Crooked Reel"] },
+    { name: "Jigs",              filter: ["--type", "Jig", "--type", "Slip Jig"] },
+    { name: "Marches & Waltzes", filter: ["--type", "March", "--type", "Waltz"] },
+    { name: "Other",             filter: ["Reel", "Slow Reel", "Crooked Reel", "Jig", "Slip Jig", "March", "Waltz", "none"]
+                                           .flatMap((t) => ["--exclude-type", t]) },
+    { name: "Untyped",           filter: ["--type", "none"] },
+  ];
+  const passthrough = args.filter((a, i) =>
+    a !== "--by-type" &&
+    a !== "--title" && args[i - 1] !== "--title" &&
+    a !== "--output" && args[i - 1] !== "--output");
+  const tsxBin = path.join(__dirname, "node_modules", ".bin", "tsx");
+  for (const fam of families) {
+    const famTitle = `${title} - ${fam.name}`;
+    console.log(`\n━━ ${famTitle} ━━`);
+    const r = spawnSync(tsxBin, [__filename, ...passthrough, ...fam.filter, "--title", famTitle], { stdio: "inherit" });
+    if (r.status) process.exit(r.status);
+  }
+  process.exit(0);
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -138,6 +179,19 @@ if (includeTags.length > 0)
   tunes = tunes.filter((t) => includeTags.every((tag) => t.tags.includes(tag)));
 if (excludeTags.length > 0)
   tunes = tunes.filter((t) => !excludeTags.some((tag) => t.tags.includes(tag)));
+
+// Type filters: "none" matches an untyped tune (no Type frontmatter).
+const matchesType = (t: Tune, v: string) =>
+  v.toLowerCase() === "none" ? !t.type : t.type.toLowerCase() === v.toLowerCase();
+if (typeFilters.length > 0)
+  tunes = tunes.filter((t) => typeFilters.some((v) => matchesType(t, v)));
+if (excludeTypes.length > 0)
+  tunes = tunes.filter((t) => !excludeTypes.some((v) => matchesType(t, v)));
+
+if (tunes.length === 0) {
+  console.log("No tunes matched the filters; nothing to generate.");
+  process.exit(0);
+}
 
 // In chords-only mode, keep just the tunes that actually have a chord chart.
 // The chart for each kept tune is cached here so it isn't recomputed at render.
