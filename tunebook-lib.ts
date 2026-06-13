@@ -107,6 +107,8 @@ export interface CommonCliOptions {
   title:        string;
   outputPath:   string | null;
   vaultDir:     string | null;   // --vault-dir override (null → use VAULT_DIR)
+  titleFont:    string | null;   // --title-font (null → default look)
+  textFont:     string | null;   // --text-font  (null → default look)
   includeCover: boolean;
   includeToc:   boolean;
   tocColumns:   number;
@@ -120,8 +122,8 @@ function resolveDir(p: string): string {
 
 export function parseCommonArgs(args: string[], defaultTitle: string): CommonCliOptions {
   const o: CommonCliOptions = {
-    includeTags: [], excludeTags: [], title: defaultTitle,
-    outputPath: null, vaultDir: null, includeCover: true, includeToc: true, tocColumns: 2,
+    includeTags: [], excludeTags: [], title: defaultTitle, outputPath: null, vaultDir: null,
+    titleFont: null, textFont: null, includeCover: true, includeToc: true, tocColumns: 2,
   };
   for (let i = 0; i < args.length; i++) {
     if      (args[i] === "--include-tag" && args[i + 1]) o.includeTags.push(args[++i]);
@@ -129,6 +131,8 @@ export function parseCommonArgs(args: string[], defaultTitle: string): CommonCli
     else if (args[i] === "--title"       && args[i + 1]) o.title = args[++i];
     else if (args[i] === "--output"      && args[i + 1]) o.outputPath = path.resolve(args[++i]);
     else if (args[i] === "--vault-dir"   && args[i + 1]) o.vaultDir = resolveDir(args[++i]);
+    else if (args[i] === "--title-font"  && args[i + 1]) o.titleFont = args[++i];
+    else if (args[i] === "--text-font"   && args[i + 1]) o.textFont = args[++i];
     else if (args[i] === "--no-cover")                   o.includeCover = false;
     else if (args[i] === "--no-toc")                     o.includeToc = false;
     else if (args[i] === "--toc-columns" && args[i + 1]) o.tocColumns = parseInt(args[++i], 10);
@@ -241,18 +245,27 @@ export function splitAbcByNewpage(abc: string): string[] {
     });
 }
 
-// ── abcjs params ─────────────────────────────────────────────────────────────
-// No `wrap` — source line breaks are honoured exactly.
-export const ABCJS_PARAMS = JSON.stringify({
-  responsive: "resize",
-  scale: 1.0,
-  format: {
-    titlefont:      "serif 22",
-    composerfont:   "serif 12",
-    infofont:       "serif 10",
-    annotationfont: "serif 11",
-  },
-});
+// ── Fonts ─────────────────────────────────────────────────────────────────────
+// Title vs text (body) font family names — any locally installed font Chromium
+// can resolve. null means "keep the default look" (serif / the Palatino stack).
+export interface FontOptions { titleFont: string | null; textFont: string | null; }
+
+// abcjs params. No `wrap` — source line breaks are honoured exactly. The title
+// uses titleFont; composer / info / chord-symbol (annotation) text uses textFont.
+export function abcjsParams(fonts: FontOptions): string {
+  const title = fonts.titleFont ?? "serif";
+  const text  = fonts.textFont  ?? "serif";
+  return JSON.stringify({
+    responsive: "resize",
+    scale: 1.0,
+    format: {
+      titlefont:      `${title} 22`,
+      composerfont:   `${text} 12`,
+      infofont:       `${text} 10`,
+      annotationfont: `${text} 11`,
+    },
+  });
+}
 
 // ── Render timestamp ─────────────────────────────────────────────────────────
 export function makeRenderTimestamp(): string {
@@ -265,12 +278,20 @@ export function makeRenderTimestamp(): string {
 // ── Shared HTML/CSS pieces ───────────────────────────────────────────────────
 // Body padding mirrors the page.pdf() side margins so abcjs SVGs render at the
 // same width they'll occupy in the printed output.
-export function commonStyles(opts: { tocColumns: number }): string {
+export function commonStyles(opts: { tocColumns: number } & FontOptions): string {
+  // The text font drives the body; the title font is exposed as --title-font for
+  // cover/section titles. Either falls back to the original Palatino/serif look.
+  const textStack = opts.textFont
+    ? `"${opts.textFont}", "Palatino Linotype", Palatino, serif`
+    : `"Palatino Linotype", Palatino, "Book Antiqua", serif`;
+  const titleStack = opts.titleFont ? `"${opts.titleFont}", serif` : "var(--text-font)";
   return `
   * { box-sizing: border-box; }
 
   body {
-    font-family: "Palatino Linotype", Palatino, "Book Antiqua", serif;
+    --text-font: ${textStack};
+    --title-font: ${titleStack};
+    font-family: var(--text-font);
     margin: 0;
     padding: 0 ${PDF_MARGIN_SIDE_IN}in;
     font-size: 11pt;
@@ -289,7 +310,7 @@ export function commonStyles(opts: { tocColumns: number }): string {
     justify-content: center;
     text-align: center;
   }
-  .cover-title { font-size: 42pt; font-weight: bold; margin: 0 0 18pt; letter-spacing: 0.02em; }
+  .cover-title { font-family: var(--title-font); font-size: 42pt; font-weight: bold; margin: 0 0 18pt; letter-spacing: 0.02em; }
   .cover-sub   { font-size: 12pt; color: #666; font-style: italic; }
 
   /* ── TOC ── */
@@ -336,13 +357,13 @@ ${lis}
 </div>`;
 }
 
-export function footerTemplate(title: string, renderTimestamp: string): string {
+export function footerTemplate(title: string, renderTimestamp: string, textFont: string | null): string {
   return `<div style="
       width: 100%;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      font-family: serif;
+      font-family: ${textFont ? `'${textFont}', serif` : "serif"};
       font-size: 9px;
       color: #666;
       padding: 0 ${PDF_MARGIN_SIDE_IN}in;
@@ -413,6 +434,7 @@ export interface RenderToPdfOptions {
   title:            string;
   renderTimestamp:  string;
   abcjsPath:        string;
+  textFont:         string | null;
 }
 
 export async function renderToPdf(opts: RenderToPdfOptions): Promise<any> {
@@ -446,7 +468,7 @@ export async function renderToPdf(opts: RenderToPdfOptions): Promise<any> {
       printBackground: false,
       displayHeaderFooter: true,
       headerTemplate: "<div></div>",
-      footerTemplate: footerTemplate(opts.title, opts.renderTimestamp),
+      footerTemplate: footerTemplate(opts.title, opts.renderTimestamp, opts.textFont),
       margin: {
         top:    `${PDF_MARGIN_TOP_IN}in`,
         bottom: `${PDF_MARGIN_BOT_IN}in`,

@@ -38,12 +38,29 @@ shell environment variables override the file, and a leading `~/` is expanded.
 | `OUTPUT_DIR` | Where generated PDFs are written              | same as `VAULT_DIR`               |
 
 The committed `.env` doubles as an example; edit it to point at your own vault,
-or override per-run:
+or override per-run. The source directory can also be overridden with the
+`--vault-dir` flag (highest precedence):
 
 ```sh
-OUTPUT_DIR=. npx tsx generate-tunebook.ts        # drop the PDF here instead of the vault
-VAULT_DIR=~/tunes npx tsx generate-tunebook.ts   # read tunes from elsewhere
+OUTPUT_DIR=. npx tsx generate-tunebook.ts            # drop the PDF here instead of the vault
+VAULT_DIR=~/tunes npx tsx generate-tunebook.ts       # read tunes from elsewhere
+npx tsx generate-tunebook.ts --vault-dir ~/tunes     # same, as a flag (beats env / .env)
 ```
+
+### Fonts
+
+Titles and body text can use any font installed locally (Chromium resolves it).
+Both default to the original Palatino/serif look.
+
+```sh
+npx tsx generate-tunebook.ts --chords \
+  --title-font "TC Wonderling Round" \
+  --text-font  "TC Jimmy Sans Pro"
+```
+
+`--title-font` styles tune/cover/section titles; `--text-font` styles body text,
+the TOC, indexes, composer/chord-symbol text, and notes. (Chord-chart grids stay
+monospace for alignment.)
 
 ## Usage
 

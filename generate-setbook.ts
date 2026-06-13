@@ -32,7 +32,7 @@ import {
   parseCommonArgs,
   VAULT_DIR, OUTPUT_DIR,
   PAGE_CONTENT_H, TUNE_HEADER_H,
-  ABCJS_PARAMS,
+  abcjsParams,
   makeRenderTimestamp,
   commonStyles, coverPageHtml, tocSectionHtml,
   addOutlines, renderToPdf, resolveAbcjsPath,
@@ -61,6 +61,8 @@ Options:
   --exclude-tag TAG    Exclude sets with this tag (repeatable)
   --output PATH        Output PDF path (default: <OUTPUT_DIR>/<title>.pdf)
   --vault-dir PATH     Tune source directory (overrides VAULT_DIR / .env)
+  --title-font NAME    Local font for set titles
+  --text-font NAME     Local font for body text / TOC / notes
   --no-cover           Omit the cover page
   --no-toc             Omit the table of contents
   --toc-columns N      Number of columns in the table of contents (default: 2)
@@ -92,7 +94,7 @@ Examples:
   process.exit(0);
 }
 
-const { includeTags, excludeTags, title, outputPath: optOutput, vaultDir: optVaultDir, includeCover, includeToc, tocColumns } =
+const { includeTags, excludeTags, title, outputPath: optOutput, vaultDir: optVaultDir, titleFont, textFont, includeCover, includeToc, tocColumns } =
   parseCommonArgs(args, "Vault Sets");
 
 // --vault-dir overrides the .env / env VAULT_DIR for this run.
@@ -309,7 +311,7 @@ ${blocks}
 <head>
 <meta charset="UTF-8">
 <style>
-${commonStyles({ tocColumns })}
+${commonStyles({ tocColumns, titleFont, textFont })}
 
   /* ── Set pages ──
      Each .set-page is a full page (height = PAGE_CONTENT_H). The .set-title
@@ -324,6 +326,7 @@ ${commonStyles({ tocColumns })}
     flex-direction: column;
   }
   .set-title {
+    font-family: var(--title-font);
     font-size: 13pt;
     font-weight: bold;
     color: #333;
@@ -365,7 +368,7 @@ ${setBlocks}
 
 <script>
 window.TUNE_DATA      = ${tuneDataJson};
-window.ABCJS_PARAMS   = ${ABCJS_PARAMS};
+window.ABCJS_PARAMS   = ${abcjsParams({ titleFont, textFont })};
 window.PAGE_CONTENT_H = ${PAGE_CONTENT_H};
 window.SET_HEADER_H   = ${TUNE_HEADER_H + 8}; /* set-title + bottom margin */
 window.MIN_PAIR_SCALE = ${MIN_PAIR_SCALE};
@@ -541,6 +544,7 @@ async function main() {
     title,
     renderTimestamp,
     abcjsPath,
+    textFont,
   });
 
   const { pages, firstSetPg } = result;
