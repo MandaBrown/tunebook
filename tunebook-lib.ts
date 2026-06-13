@@ -141,8 +141,14 @@ export function processAbcLine(line: string): string | null {
   return line;
 }
 
+// Normalize Windows (CRLF) and classic-Mac (CR) line endings to plain LF so the
+// rest of the line-based parsing (splits, ^/$ anchors, the fence regex) behaves.
+export function normalizeNewlines(s: string): string {
+  return s.replace(/\r\n?/g, "\n");
+}
+
 export function cleanAbc(abc: string): string {
-  return abc
+  return normalizeNewlines(abc)
     .split("\n")
     .map(processAbcLine)
     .filter((l): l is string => l !== null)
@@ -154,7 +160,7 @@ export function cleanAbc(abc: string): string {
 // cleaned, or null if the note has no ABC block.
 const ABC_BLOCK_RE = /```music-abc\n([\s\S]*?)```/;
 export function extractAbcBlock(markdown: string): string | null {
-  const m = markdown.match(ABC_BLOCK_RE);
+  const m = normalizeNewlines(markdown).match(ABC_BLOCK_RE);
   return m ? cleanAbc(m[1]) : null;
 }
 
@@ -169,6 +175,7 @@ export function extractAbcBlock(markdown: string): string | null {
 // Other text-rendering info fields (C/S/R/N/H/A/O/B/Z) are dropped from
 // continuation headers so composer, source, etc. only print on page 1.
 export function splitAbcByNewpage(abc: string): string[] {
+  abc = normalizeNewlines(abc);
   const lines = abc.split("\n");
   if (!lines.some((l) => /^%%newpage\b/.test(l))) return [abc];
 

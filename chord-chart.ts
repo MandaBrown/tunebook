@@ -287,8 +287,9 @@ function parseMusicLine(line: string, unitLen: number, startMeter: string): { to
 
 // ── Main conversion ───────────────────────────────────────────────────────────
 export function abcToChordChart(abc: string): ChordChart | null {
-  // Join ABC line continuations (a trailing "\" means "no line break here").
-  const rawLines = abc.replace(/\\\s*\n/g, " ").split("\n");
+  // Normalize CRLF/CR to LF, then join ABC line continuations (a trailing "\"
+  // means "no line break here").
+  const rawLines = abc.replace(/\r\n?/g, "\n").replace(/\\\s*\n/g, " ").split("\n");
 
   let meterStr = "4/4";
   let unitLen: number | null = null;
@@ -512,7 +513,7 @@ const invokedDirectly = !!process.argv[1] && /chord-chart\.[tj]s$/.test(process.
 if (invokedDirectly) {
   const file = process.argv[2];
   if (!file) { console.error("usage: tsx chord-chart.ts <tune.md|tune.abc>"); process.exit(1); }
-  const raw = fs.readFileSync(file, "utf-8");
+  const raw = fs.readFileSync(file, "utf-8").replace(/\r\n?/g, "\n");
   const fence = raw.match(/```music-abc\n([\s\S]*?)```/);
   const abc = fence ? fence[1] : raw;
   const chart = abcToChordChart(abc);
