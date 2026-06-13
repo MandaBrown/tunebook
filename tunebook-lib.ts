@@ -267,6 +267,95 @@ export function abcjsParams(fonts: FontOptions): string {
   });
 }
 
+// ── Font embedding ────────────────────────────────────────────────────────────
+// Chromium renders a system font on screen but refuses to embed it in a PDF
+// unless its fsType permits installable embedding — restricted fonts (e.g.
+// fsType "Preview & Print") silently fall back to serif. To honour any locally
+// installed font we locate its file and inline it with @font-face, which is
+// treated as an author web font and always embeds.
+
+// Read the (typographic) family and subfamily from an sfnt 'name' table.
+function readFontNames(file: string): { family: string; subfamily: string } | null {
+  let buf: Buffer;
+  try { buf = fs.readFileSync(file); } catch { return null; }
+  if (buf.length < 12) return null;
+  const numTables = buf.readUInt16BE(4);
+  let nameOff = -1;
+  for (let i = 0; i < numTables; i++) {
+    const rec = 12 + i * 16;
+    if (buf.toString("latin1", rec, rec + 4) === "name") { nameOff = buf.readUInt32BE(rec + 8); break; }
+  }
+  if (nameOff < 0 || nameOff + 6 > buf.length) return null;
+  const count  = buf.readUInt16BE(nameOff + 2);
+  const strOff = nameOff + buf.readUInt16BE(nameOff + 4);
+  let family = "", typoFamily = "", subfamily = "";
+  for (let i = 0; i < count; i++) {
+    const r = nameOff + 6 + i * 12;
+    if (r + 12 > buf.length) break;
+    const platformID = buf.readUInt16BE(r);
+    const nameID     = buf.readUInt16BE(r + 6);
+    const len        = buf.readUInt16BE(r + 8);
+    const off        = strOff + buf.readUInt16BE(r + 10);
+    if (off + len > buf.length) continue;
+    // UTF-16BE (Windows/Unicode platforms) is ASCII-with-nulls for font names.
+    const raw = buf.toString("latin1", off, off + len);
+    const s = (platformID === 3 || platformID === 0) ? raw.replace(/ /g, "") : raw;
+    if      (nameID === 1  && !family)     family = s;
+    else if (nameID === 16)                typoFamily = s;
+    else if (nameID === 2  && !subfamily)  subfamily = s;
+  }
+  return { family: (typoFamily || family).trim(), subfamily: subfamily.trim() };
+}
+
+const FONT_DIRS = [
+  path.join(os.homedir(), "Library", "Fonts"),
+  "/Library/Fonts",
+  "/System/Library/Fonts",
+  "/System/Library/Fonts/Supplemental",
+];
+
+// Resolve each requested family name to a font file (preferring the Regular
+// face) in a single pass over the font directories. Case/space-insensitive.
+function resolveFontFiles(families: string[]): Map<string, string> {
+  const want = new Map(families.map((f) => [f.trim().toLowerCase(), f]));
+  const file = new Map<string, string>();      // key → path
+  const haveRegular = new Set<string>();
+  for (const dir of FONT_DIRS) {
+    let entries: string[];
+    try { entries = fs.readdirSync(dir); } catch { continue; }
+    for (const e of entries) {
+      if (!/\.(otf|ttf)$/i.test(e)) continue;
+      const p = path.join(dir, e);
+      const names = readFontNames(p);
+      if (!names) continue;
+      const key = names.family.toLowerCase();
+      if (!want.has(key) || haveRegular.has(key)) continue;
+      const isRegular = names.subfamily === "" || /^regular$/i.test(names.subfamily);
+      if (!file.has(key) || isRegular) file.set(key, p);
+      if (isRegular) haveRegular.add(key);
+    }
+  }
+  const out = new Map<string, string>();
+  for (const [key, orig] of want) { const p = file.get(key); if (p) out.set(orig, p); }
+  return out;
+}
+
+// @font-face blocks (data-URL embedded) for the requested fonts, so HTML text
+// and abcjs SVG text both resolve them. Missing fonts are skipped (the name is
+// still used, which works for unrestricted / generic families).
+export function fontFaceBlocks(fonts: FontOptions): string {
+  const families = [fonts.titleFont, fonts.textFont].filter((f): f is string => !!f);
+  if (families.length === 0) return "";
+  const files = resolveFontFiles([...new Set(families)]);
+  const blocks: string[] = [];
+  for (const [family, p] of files) {
+    const ttf = path.extname(p).toLowerCase() === ".ttf";
+    const b64 = fs.readFileSync(p).toString("base64");
+    blocks.push(`@font-face { font-family: "${family}"; src: url(data:${ttf ? "font/ttf" : "font/otf"};base64,${b64}) format("${ttf ? "truetype" : "opentype"}"); }`);
+  }
+  return blocks.join("\n");
+}
+
 // ── Render timestamp ─────────────────────────────────────────────────────────
 export function makeRenderTimestamp(): string {
   return new Date().toLocaleString("en-US", {
@@ -286,6 +375,8 @@ export function commonStyles(opts: { tocColumns: number } & FontOptions): string
     : `"Palatino Linotype", Palatino, "Book Antiqua", serif`;
   const titleStack = opts.titleFont ? `"${opts.titleFont}", serif` : "var(--text-font)";
   return `
+  ${fontFaceBlocks(opts)}
+
   * { box-sizing: border-box; }
 
   body {

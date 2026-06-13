@@ -62,6 +62,11 @@ npx tsx generate-tunebook.ts --chords \
 the TOC, indexes, composer/chord-symbol text, and notes. (Chord-chart grids stay
 monospace for alignment.)
 
+Each chosen font is located on disk and embedded in the PDF via `@font-face`, so
+it renders even if its license flags would otherwise stop Chromium embedding it
+(e.g. "Preview & Print" fonts) — and the PDF stays self-contained. Font lookup
+checks the standard macOS font folders.
+
 ## Usage
 
 Every script supports `--help`. Common runs:
