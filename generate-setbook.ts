@@ -42,9 +42,6 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
-const SETS_DIR = path.join(VAULT_DIR, "sets");
-const ABC_DIR  = path.join(VAULT_DIR, "abc");
-
 // Pairing threshold: two tunes share a page only if the required scale ratio
 // stays at or above this fraction (0.65 = at most 35% shrink). Below that,
 // each tune gets its own page where it can use the full music area.
@@ -62,7 +59,8 @@ Options:
   --title TITLE        Title for cover, footer, and output filename (default: "Vault Sets")
   --include-tag TAG    Only include sets with this tag (repeatable; multiple = AND)
   --exclude-tag TAG    Exclude sets with this tag (repeatable)
-  --output PATH        Output PDF path (default: ../<title>.pdf)
+  --output PATH        Output PDF path (default: <OUTPUT_DIR>/<title>.pdf)
+  --vault-dir PATH     Tune source directory (overrides VAULT_DIR / .env)
   --no-cover           Omit the cover page
   --no-toc             Omit the table of contents
   --toc-columns N      Number of columns in the table of contents (default: 2)
@@ -94,8 +92,13 @@ Examples:
   process.exit(0);
 }
 
-const { includeTags, excludeTags, title, outputPath: optOutput, includeCover, includeToc, tocColumns } =
+const { includeTags, excludeTags, title, outputPath: optOutput, vaultDir: optVaultDir, includeCover, includeToc, tocColumns } =
   parseCommonArgs(args, "Vault Sets");
+
+// --vault-dir overrides the .env / env VAULT_DIR for this run.
+const VAULT = optVaultDir ?? VAULT_DIR;
+const SETS_DIR = path.join(VAULT, "sets");
+const ABC_DIR  = path.join(VAULT, "abc");
 
 const outputPath = optOutput ?? path.join(OUTPUT_DIR, `${title}.pdf`);
 
@@ -130,7 +133,7 @@ interface SetRecord {
 function resolveWikilink(link: string): string | null {
   const target = link.split("|")[0].trim();
   const candidates = target.includes("/")
-    ? [path.join(VAULT_DIR, target + ".md")]
+    ? [path.join(VAULT, target + ".md")]
     : [path.join(ABC_DIR, target + ".md")];
   for (const c of candidates) if (fs.existsSync(c)) return c;
   return null;

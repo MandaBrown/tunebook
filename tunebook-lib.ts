@@ -106,21 +106,29 @@ export interface CommonCliOptions {
   excludeTags:  string[];
   title:        string;
   outputPath:   string | null;
+  vaultDir:     string | null;   // --vault-dir override (null → use VAULT_DIR)
   includeCover: boolean;
   includeToc:   boolean;
   tocColumns:   number;
 }
 
+// Resolve a directory CLI argument: expand a leading ~/ and make it absolute.
+function resolveDir(p: string): string {
+  if (p === "~" || p.startsWith("~/")) return path.join(os.homedir(), p.slice(1));
+  return path.resolve(p);
+}
+
 export function parseCommonArgs(args: string[], defaultTitle: string): CommonCliOptions {
   const o: CommonCliOptions = {
     includeTags: [], excludeTags: [], title: defaultTitle,
-    outputPath: null, includeCover: true, includeToc: true, tocColumns: 2,
+    outputPath: null, vaultDir: null, includeCover: true, includeToc: true, tocColumns: 2,
   };
   for (let i = 0; i < args.length; i++) {
     if      (args[i] === "--include-tag" && args[i + 1]) o.includeTags.push(args[++i]);
     else if (args[i] === "--exclude-tag" && args[i + 1]) o.excludeTags.push(args[++i]);
     else if (args[i] === "--title"       && args[i + 1]) o.title = args[++i];
     else if (args[i] === "--output"      && args[i + 1]) o.outputPath = path.resolve(args[++i]);
+    else if (args[i] === "--vault-dir"   && args[i + 1]) o.vaultDir = resolveDir(args[++i]);
     else if (args[i] === "--no-cover")                   o.includeCover = false;
     else if (args[i] === "--no-toc")                     o.includeToc = false;
     else if (args[i] === "--toc-columns" && args[i + 1]) o.tocColumns = parseInt(args[++i], 10);

@@ -28,8 +28,6 @@ import { abcToChordChart, ChordChart } from "./chord-chart.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
-const ABC_DIR = path.join(VAULT_DIR, "abc");
-
 // ── CLI args ──────────────────────────────────────────────────────────────────
 
 const args = process.argv.slice(2);
@@ -42,7 +40,8 @@ Options:
   --title TITLE        Title for cover, footer, and output filename (default: "Vault Tunes")
   --include-tag TAG    Only include tunes with this tag (repeatable; multiple = AND)
   --exclude-tag TAG    Exclude tunes with this tag (repeatable)
-  --output PATH        Output PDF path (default: ../<title>.pdf)
+  --output PATH        Output PDF path (default: <OUTPUT_DIR>/<title>.pdf)
+  --vault-dir PATH     Tune source directory (overrides VAULT_DIR / .env)
   --no-cover           Omit the cover page
   --no-toc             Omit the table of contents
   --no-type-index      Omit the Index by Type
@@ -72,8 +71,11 @@ Examples:
   process.exit(0);
 }
 
-const { includeTags, excludeTags, title, outputPath: optOutput, includeCover, includeToc, tocColumns } =
+const { includeTags, excludeTags, title, outputPath: optOutput, vaultDir: optVaultDir, includeCover, includeToc, tocColumns } =
   parseCommonArgs(args, "Vault Tunes");
+
+// --vault-dir overrides the .env / env VAULT_DIR for this run.
+const ABC_DIR = path.join(optVaultDir ?? VAULT_DIR, "abc");
 // Index and chord flags are unique to the tunebook; scan for them directly.
 const includeTypeIndex   = !args.includes("--no-type-index");
 const includeAuthorIndex = !args.includes("--no-author-index");
