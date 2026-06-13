@@ -109,6 +109,7 @@ export interface CommonCliOptions {
   vaultDir:     string | null;   // --vault-dir override (null → use VAULT_DIR)
   titleFont:    string | null;   // --title-font (null → default look)
   textFont:     string | null;   // --text-font  (null → default look)
+  chordFont:    string | null;   // --chord-font (null → abcjs default)
   includeCover: boolean;
   includeToc:   boolean;
   tocColumns:   number;
@@ -123,7 +124,7 @@ function resolveDir(p: string): string {
 export function parseCommonArgs(args: string[], defaultTitle: string): CommonCliOptions {
   const o: CommonCliOptions = {
     includeTags: [], excludeTags: [], title: defaultTitle, outputPath: null, vaultDir: null,
-    titleFont: null, textFont: null, includeCover: true, includeToc: true, tocColumns: 2,
+    titleFont: null, textFont: null, chordFont: null, includeCover: true, includeToc: true, tocColumns: 2,
   };
   for (let i = 0; i < args.length; i++) {
     if      (args[i] === "--include-tag" && args[i + 1]) o.includeTags.push(args[++i]);
@@ -133,6 +134,7 @@ export function parseCommonArgs(args: string[], defaultTitle: string): CommonCli
     else if (args[i] === "--vault-dir"   && args[i + 1]) o.vaultDir = resolveDir(args[++i]);
     else if (args[i] === "--title-font"  && args[i + 1]) o.titleFont = args[++i];
     else if (args[i] === "--text-font"   && args[i + 1]) o.textFont = args[++i];
+    else if (args[i] === "--chord-font"  && args[i + 1]) o.chordFont = args[++i];
     else if (args[i] === "--no-cover")                   o.includeCover = false;
     else if (args[i] === "--no-toc")                     o.includeToc = false;
     else if (args[i] === "--toc-columns" && args[i + 1]) o.tocColumns = parseInt(args[++i], 10);
@@ -248,23 +250,31 @@ export function splitAbcByNewpage(abc: string): string[] {
 // ── Fonts ─────────────────────────────────────────────────────────────────────
 // Title vs text (body) font family names — any locally installed font Chromium
 // can resolve. null means "keep the default look" (serif / the Palatino stack).
-export interface FontOptions { titleFont: string | null; textFont: string | null; }
+export interface FontOptions { titleFont: string | null; textFont: string | null; chordFont: string | null; }
 
-// abcjs params. No `wrap` — source line breaks are honoured exactly. The title
-// uses titleFont; composer / info / chord-symbol (annotation) text uses textFont.
+// abcjs params. No `wrap` — source line breaks are honoured exactly. The main
+// title uses titleFont; every other text slot abcjs draws (subtitle, composer,
+// source/info, %%text notes, chord symbols, lyrics, part labels, …) uses
+// textFont, so all written text in the music matches the chosen body font.
 export function abcjsParams(fonts: FontOptions): string {
   const title = fonts.titleFont ?? "serif";
   const text  = fonts.textFont  ?? "serif";
-  return JSON.stringify({
-    responsive: "resize",
-    scale: 1.0,
-    format: {
-      titlefont:      `${title} 22`,
-      composerfont:   `${text} 12`,
-      infofont:       `${text} 10`,
-      annotationfont: `${text} 11`,
-    },
-  });
+  const format: Record<string, string> = {
+    titlefont:      `${title} 22`,
+    subtitlefont:   `${text} 15`,
+    composerfont:   `${text} 12`,
+    infofont:       `${text} 11`,
+    historyfont:    `${text} 13`,
+    textfont:       `${text} 13`,
+    annotationfont: `${text} 11`,
+    partsfont:      `${text} 15`,
+    wordsfont:      `${text} 13`,
+    vocalfont:      `${text} 12`,
+  };
+  // Chord symbols (gchord) are separately configurable; if no chord font is
+  // given we leave gchordfont unset so abcjs uses its own default.
+  if (fonts.chordFont) format.gchordfont = `${fonts.chordFont} 11`;
+  return JSON.stringify({ responsive: "resize", scale: 1.0, format });
 }
 
 // ── Font embedding ────────────────────────────────────────────────────────────
@@ -344,7 +354,7 @@ function resolveFontFiles(families: string[]): Map<string, string> {
 // and abcjs SVG text both resolve them. Missing fonts are skipped (the name is
 // still used, which works for unrestricted / generic families).
 export function fontFaceBlocks(fonts: FontOptions): string {
-  const families = [fonts.titleFont, fonts.textFont].filter((f): f is string => !!f);
+  const families = [fonts.titleFont, fonts.textFont, fonts.chordFont].filter((f): f is string => !!f);
   if (families.length === 0) return "";
   const files = resolveFontFiles([...new Set(families)]);
   const blocks: string[] = [];

@@ -55,12 +55,15 @@ Both default to the original Palatino/serif look.
 ```sh
 npx tsx generate-tunebook.ts --chords \
   --title-font "TC Wonderling Round" \
-  --text-font  "TC Jimmy Sans Pro"
+  --text-font  "TC Jimmy Sans Pro" \
+  --chord-font "TC Jimmy Sans Pro"   # optional; omit to keep abcjs' chord font
 ```
 
-`--title-font` styles tune/cover/section titles; `--text-font` styles body text,
-the TOC, indexes, composer/chord-symbol text, and notes. (Chord-chart grids stay
-monospace for alignment.)
+- `--title-font` — tune / cover / section titles.
+- `--text-font` — everything else written: body text, TOC, indexes, composer,
+  subtitle, source, `%%text` notes, lyrics. (Chord-chart grids stay monospace.)
+- `--chord-font` — chord symbols above the staff only; if omitted, abcjs' own
+  default font is used.
 
 Each chosen font is located on disk and embedded in the PDF via `@font-face`, so
 it renders even if its license flags would otherwise stop Chromium embedding it

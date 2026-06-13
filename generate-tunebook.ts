@@ -42,8 +42,9 @@ Options:
   --exclude-tag TAG    Exclude tunes with this tag (repeatable)
   --output PATH        Output PDF path (default: <OUTPUT_DIR>/<title>.pdf)
   --vault-dir PATH     Tune source directory (overrides VAULT_DIR / .env)
-  --title-font NAME    Local font for titles (e.g. "TC Wondering Round")
-  --text-font NAME     Local font for body text / TOC / indexes / chord charts
+  --title-font NAME    Local font for titles (e.g. "TC Wonderling Round")
+  --text-font NAME     Local font for body text / TOC / indexes / notes
+  --chord-font NAME    Local font for chord symbols above the staff (default: abcjs')
   --no-cover           Omit the cover page
   --no-toc             Omit the table of contents
   --no-type-index      Omit the Index by Type
@@ -73,7 +74,7 @@ Examples:
   process.exit(0);
 }
 
-const { includeTags, excludeTags, title, outputPath: optOutput, vaultDir: optVaultDir, titleFont, textFont, includeCover, includeToc, tocColumns } =
+const { includeTags, excludeTags, title, outputPath: optOutput, vaultDir: optVaultDir, titleFont, textFont, chordFont, includeCover, includeToc, tocColumns } =
   parseCommonArgs(args, "Vault Tunes");
 
 // --vault-dir overrides the .env / env VAULT_DIR for this run.
@@ -326,7 +327,7 @@ function buildHtml(): string {
 <head>
 <meta charset="UTF-8">
 <style>
-${commonStyles({ tocColumns, titleFont, textFont })}
+${commonStyles({ tocColumns, titleFont, textFont, chordFont })}
 
   /* ── Tune pages ──
      The outer div has a FIXED height = page content area so the page-break
@@ -421,7 +422,7 @@ ${includeAuthorIndex ? `
 
 <script>
 window.TUNE_DATA           = ${tuneDataJson};
-window.ABCJS_PARAMS        = ${abcjsParams({ titleFont, textFont })};
+window.ABCJS_PARAMS        = ${abcjsParams({ titleFont, textFont, chordFont })};
 window.PAGE_CONTENT_H      = ${PAGE_CONTENT_H};
 window.TUNE_MUSIC_H        = ${TUNE_MUSIC_H};
 window.INCLUDE_COVER       = ${includeCover};
