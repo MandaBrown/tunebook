@@ -108,8 +108,11 @@ export interface CommonCliOptions {
   outputPath:   string | null;
   vaultDir:     string | null;   // --vault-dir override (null → use VAULT_DIR)
   titleFont:    string | null;   // --title-font (null → default look)
+  titleWeight:  string | null;   // --title-weight
   textFont:     string | null;   // --text-font  (null → default look)
+  textWeight:   string | null;   // --text-weight
   chordFont:    string | null;   // --chord-font (null → abcjs default)
+  chordWeight:  string | null;   // --chord-weight
   includeCover: boolean;
   includeToc:   boolean;
   tocColumns:   number;
@@ -124,7 +127,8 @@ function resolveDir(p: string): string {
 export function parseCommonArgs(args: string[], defaultTitle: string): CommonCliOptions {
   const o: CommonCliOptions = {
     includeTags: [], excludeTags: [], title: defaultTitle, outputPath: null, vaultDir: null,
-    titleFont: null, textFont: null, chordFont: null, includeCover: true, includeToc: true, tocColumns: 2,
+    titleFont: null, titleWeight: null, textFont: null, textWeight: null, chordFont: null, chordWeight: null,
+    includeCover: true, includeToc: true, tocColumns: 2,
   };
   for (let i = 0; i < args.length; i++) {
     if      (args[i] === "--include-tag" && args[i + 1]) o.includeTags.push(args[++i]);
@@ -132,10 +136,13 @@ export function parseCommonArgs(args: string[], defaultTitle: string): CommonCli
     else if (args[i] === "--title"       && args[i + 1]) o.title = args[++i];
     else if (args[i] === "--output"      && args[i + 1]) o.outputPath = path.resolve(args[++i]);
     else if (args[i] === "--vault-dir"   && args[i + 1]) o.vaultDir = resolveDir(args[++i]);
-    else if (args[i] === "--title-font"  && args[i + 1]) o.titleFont = args[++i];
-    else if (args[i] === "--text-font"   && args[i + 1]) o.textFont = args[++i];
-    else if (args[i] === "--chord-font"  && args[i + 1]) o.chordFont = args[++i];
-    else if (args[i] === "--no-cover")                   o.includeCover = false;
+    else if (args[i] === "--title-font"   && args[i + 1]) o.titleFont = args[++i];
+    else if (args[i] === "--title-weight" && args[i + 1]) o.titleWeight = args[++i];
+    else if (args[i] === "--text-font"    && args[i + 1]) o.textFont = args[++i];
+    else if (args[i] === "--text-weight"  && args[i + 1]) o.textWeight = args[++i];
+    else if (args[i] === "--chord-font"   && args[i + 1]) o.chordFont = args[++i];
+    else if (args[i] === "--chord-weight" && args[i + 1]) o.chordWeight = args[++i];
+    else if (args[i] === "--no-cover")                    o.includeCover = false;
     else if (args[i] === "--no-toc")                     o.includeToc = false;
     else if (args[i] === "--toc-columns" && args[i + 1]) o.tocColumns = parseInt(args[++i], 10);
   }
@@ -250,30 +257,81 @@ export function splitAbcByNewpage(abc: string): string[] {
 // ── Fonts ─────────────────────────────────────────────────────────────────────
 // Title vs text (body) font family names — any locally installed font Chromium
 // can resolve. null means "keep the default look" (serif / the Palatino stack).
-export interface FontOptions { titleFont: string | null; textFont: string | null; chordFont: string | null; }
+export interface FontOptions {
+  titleFont: string | null; titleWeight: string | null;
+  textFont:  string | null; textWeight:  string | null;
+  chordFont: string | null; chordWeight: string | null;
+}
+
+const WEIGHT_NAMES: Record<string, number> = {
+  thin: 100, hairline: 100, extralight: 200, ultralight: 200, light: 300,
+  normal: 400, regular: 400, book: 400, medium: 500, semibold: 600, demibold: 600,
+  bold: 700, extrabold: 800, ultrabold: 800, black: 900, heavy: 900,
+};
+function weightToNumber(w: string): number {
+  const t = w.trim().toLowerCase().replace(/[\s-]/g, "");
+  return /^\d+$/.test(t) ? parseInt(t, 10) : (WEIGHT_NAMES[t] ?? 400);
+}
+
+export interface ResolvedFont { family: string; weight: number; italic: boolean; file: string | null; }
+interface FontFile { family: string; fullName: string; weight: number; italic: boolean; file: string; }
+let FONT_INDEX: FontFile[] | null = null;
+
+// Resolve a family name + optional requested weight to an actual installed face.
+// `name` may also be a full face name like "TC Elderwick Bold". When nothing
+// matches, the name is used as-is with no file (works for generic / already
+// installable families); a null file means "use the name, don't embed".
+function slotFont(name: string | null, weight: string | null): ResolvedFont | null {
+  if (!name) return null;
+  const want = name.trim().toLowerCase();
+  const cands = fontIndex().filter((f) => f.family.toLowerCase() === want || f.fullName.toLowerCase() === want);
+  if (!cands.length) return { family: name, weight: weight ? weightToNumber(weight) : 400, italic: false, file: null };
+  const desired = weight ? weightToNumber(weight) : null;
+  const pick = desired != null
+    ? cands.reduce((a, b) => Math.abs(b.weight - desired) < Math.abs(a.weight - desired) ? b : a)
+    : (cands.find((f) => f.fullName.toLowerCase() === want)
+        ?? cands.find((f) => f.weight === 400 && !f.italic) ?? cands[0]);
+  return { family: pick.family, weight: desired ?? pick.weight, italic: pick.italic, file: pick.file };
+}
+
+function fontSlots(opts: FontOptions) {
+  return {
+    title: slotFont(opts.titleFont, opts.titleWeight),
+    text:  slotFont(opts.textFont,  opts.textWeight),
+    chord: slotFont(opts.chordFont, opts.chordWeight),
+  };
+}
+
+// An abcjs font string ("family bold italic size"). abcjs maps bold/italic to
+// the SVG text weight/style, matching the embedded @font-face face.
+function abcjsFont(f: ResolvedFont | null, size: number, fallback: string): string {
+  if (!f) return `${fallback} ${size}`;
+  return `${f.family}${f.weight >= 600 ? " bold" : ""}${f.italic ? " italic" : ""} ${size}`;
+}
 
 // abcjs params. No `wrap` — source line breaks are honoured exactly. The main
-// title uses titleFont; every other text slot abcjs draws (subtitle, composer,
-// source/info, %%text notes, chord symbols, lyrics, part labels, …) uses
-// textFont, so all written text in the music matches the chosen body font.
-export function abcjsParams(fonts: FontOptions): string {
-  const title = fonts.titleFont ?? "serif";
-  const text  = fonts.textFont  ?? "serif";
+// title uses the title font; every other text slot abcjs draws (subtitle,
+// composer, source/info, %%text notes, lyrics, part labels) uses the text font.
+// Chord symbols (gchord) use the chord font when given, else abcjs' default.
+export function abcjsParams(opts: FontOptions): string {
+  const { title, text, chord } = fontSlots(opts);
   const format: Record<string, string> = {
-    titlefont:      `${title} 22`,
-    subtitlefont:   `${text} 15`,
-    composerfont:   `${text} 12`,
-    infofont:       `${text} 11`,
-    historyfont:    `${text} 13`,
-    textfont:       `${text} 13`,
-    annotationfont: `${text} 11`,
-    partsfont:      `${text} 15`,
-    wordsfont:      `${text} 13`,
-    vocalfont:      `${text} 12`,
+    titlefont:      title ? abcjsFont(title, 22, "serif") : "serif 22",
+    subtitlefont:   abcjsFont(text, 15, "serif"),
+    composerfont:   abcjsFont(text, 12, "serif"),
+    infofont:       abcjsFont(text, 11, "serif"),
+    historyfont:    abcjsFont(text, 13, "serif"),
+    textfont:       abcjsFont(text, 13, "serif"),
+    annotationfont: abcjsFont(text, 11, "serif"),
+    partsfont:      abcjsFont(text, 15, "serif"),
+    wordsfont:      abcjsFont(text, 13, "serif"),
+    vocalfont:      abcjsFont(text, 12, "serif"),
+    repeatfont:     abcjsFont(text, 12, "serif"),   // 1./2. endings, "Last time only"
+    measurefont:    abcjsFont(text, 11, "serif"),   // bar numbers
+    tripletfont:    abcjsFont(text, 11, "serif"),   // triplet marks
+    tempofont:      abcjsFont(text, 12, "serif"),
   };
-  // Chord symbols (gchord) are separately configurable; if no chord font is
-  // given we leave gchordfont unset so abcjs uses its own default.
-  if (fonts.chordFont) format.gchordfont = `${fonts.chordFont} 11`;
+  if (chord) format.gchordfont = abcjsFont(chord, 11, "serif");
   return JSON.stringify({ responsive: "resize", scale: 1.0, format });
 }
 
@@ -324,44 +382,43 @@ const FONT_DIRS = [
   "/System/Library/Fonts/Supplemental",
 ];
 
-// Resolve each requested family name to a font file (preferring the Regular
-// face) in a single pass over the font directories. Case/space-insensitive.
-function resolveFontFiles(families: string[]): Map<string, string> {
-  const want = new Map(families.map((f) => [f.trim().toLowerCase(), f]));
-  const file = new Map<string, string>();      // key → path
-  const haveRegular = new Set<string>();
+// Index every installed font face once: family, a "full name" (family +
+// subfamily, so "TC Elderwick Bold" resolves), its weight and italic flag.
+function fontIndex(): FontFile[] {
+  if (FONT_INDEX) return FONT_INDEX;
+  const idx: FontFile[] = [];
   for (const dir of FONT_DIRS) {
     let entries: string[];
     try { entries = fs.readdirSync(dir); } catch { continue; }
     for (const e of entries) {
       if (!/\.(otf|ttf)$/i.test(e)) continue;
       const p = path.join(dir, e);
-      const names = readFontNames(p);
-      if (!names) continue;
-      const key = names.family.toLowerCase();
-      if (!want.has(key) || haveRegular.has(key)) continue;
-      const isRegular = names.subfamily === "" || /^regular$/i.test(names.subfamily);
-      if (!file.has(key) || isRegular) file.set(key, p);
-      if (isRegular) haveRegular.add(key);
+      const n = readFontNames(p);
+      if (!n || !n.family) continue;
+      const sub = n.subfamily.toLowerCase();
+      const italic = /italic|oblique/.test(sub);
+      const weight = weightToNumber(sub.replace(/italic|oblique/g, "").trim() || "regular");
+      const fullName = n.subfamily && !/^regular$/i.test(n.subfamily) ? `${n.family} ${n.subfamily}` : n.family;
+      idx.push({ family: n.family, fullName, weight, italic, file: p });
     }
   }
-  const out = new Map<string, string>();
-  for (const [key, orig] of want) { const p = file.get(key); if (p) out.set(orig, p); }
-  return out;
+  return (FONT_INDEX = idx);
 }
 
-// @font-face blocks (data-URL embedded) for the requested fonts, so HTML text
-// and abcjs SVG text both resolve them. Missing fonts are skipped (the name is
-// still used, which works for unrestricted / generic families).
-export function fontFaceBlocks(fonts: FontOptions): string {
-  const families = [fonts.titleFont, fonts.textFont, fonts.chordFont].filter((f): f is string => !!f);
-  if (families.length === 0) return "";
-  const files = resolveFontFiles([...new Set(families)]);
+// @font-face blocks (data-URL embedded) for the requested faces, so HTML text
+// and abcjs SVG text both resolve them. Faces with no installed file are skipped
+// (the name is still used, which works for unrestricted / generic families).
+export function fontFaceBlocks(opts: FontOptions): string {
+  const seen = new Set<string>();
   const blocks: string[] = [];
-  for (const [family, p] of files) {
-    const ttf = path.extname(p).toLowerCase() === ".ttf";
-    const b64 = fs.readFileSync(p).toString("base64");
-    blocks.push(`@font-face { font-family: "${family}"; src: url(data:${ttf ? "font/ttf" : "font/otf"};base64,${b64}) format("${ttf ? "truetype" : "opentype"}"); }`);
+  for (const s of Object.values(fontSlots(opts))) {
+    if (!s || !s.file) continue;
+    const key = `${s.family}|${s.weight}|${s.italic}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const ttf = path.extname(s.file).toLowerCase() === ".ttf";
+    const b64 = fs.readFileSync(s.file).toString("base64");
+    blocks.push(`@font-face { font-family: "${s.family}"; font-weight: ${s.weight}; font-style: ${s.italic ? "italic" : "normal"}; src: url(data:${ttf ? "font/ttf" : "font/otf"};base64,${b64}) format("${ttf ? "truetype" : "opentype"}"); }`);
   }
   return blocks.join("\n");
 }
@@ -380,10 +437,17 @@ export function makeRenderTimestamp(): string {
 export function commonStyles(opts: { tocColumns: number } & FontOptions): string {
   // The text font drives the body; the title font is exposed as --title-font for
   // cover/section titles. Either falls back to the original Palatino/serif look.
-  const textStack = opts.textFont
-    ? `"${opts.textFont}", "Palatino Linotype", Palatino, serif`
+  // Weight/style are exposed too so a chosen weight applies to HTML text.
+  const { title, text } = fontSlots(opts);
+  const textStack = text
+    ? `"${text.family}", "Palatino Linotype", Palatino, serif`
     : `"Palatino Linotype", Palatino, "Book Antiqua", serif`;
-  const titleStack = opts.titleFont ? `"${opts.titleFont}", serif` : "var(--text-font)";
+  const titleStack = title ? `"${title.family}", serif` : "var(--text-font)";
+  const textWeight = text ? text.weight : "normal";
+  const textStyle  = text && text.italic ? "italic" : "normal";
+  // Titles are bold by design unless the caller asked for a specific weight.
+  const titleWeight = (opts.titleWeight && title) ? title.weight : "bold";
+  const titleStyle  = title && title.italic ? "italic" : "normal";
   return `
   ${fontFaceBlocks(opts)}
 
@@ -392,7 +456,13 @@ export function commonStyles(opts: { tocColumns: number } & FontOptions): string
   body {
     --text-font: ${textStack};
     --title-font: ${titleStack};
+    --text-weight: ${textWeight};
+    --text-style: ${textStyle};
+    --title-weight: ${titleWeight};
+    --title-style: ${titleStyle};
     font-family: var(--text-font);
+    font-weight: var(--text-weight);
+    font-style: var(--text-style);
     margin: 0;
     padding: 0 ${PDF_MARGIN_SIDE_IN}in;
     font-size: 11pt;
@@ -411,7 +481,7 @@ export function commonStyles(opts: { tocColumns: number } & FontOptions): string
     justify-content: center;
     text-align: center;
   }
-  .cover-title { font-family: var(--title-font); font-size: 42pt; font-weight: bold; margin: 0 0 18pt; letter-spacing: 0.02em; }
+  .cover-title { font-family: var(--title-font); font-weight: var(--title-weight); font-style: var(--title-style); font-size: 42pt; margin: 0 0 18pt; letter-spacing: 0.02em; }
   .cover-sub   { font-size: 12pt; color: #666; font-style: italic; }
 
   /* ── TOC ── */

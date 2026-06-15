@@ -49,23 +49,28 @@ npx tsx generate-tunebook.ts --vault-dir ~/tunes     # same, as a flag (beats en
 
 ### Fonts
 
-Titles and body text can use any font installed locally (Chromium resolves it).
-Both default to the original Palatino/serif look.
+Titles, body text, and chord symbols can each use any locally installed font.
+Each has an optional weight; everything defaults to the Palatino/serif look.
 
 ```sh
 npx tsx generate-tunebook.ts --chords \
   --title-font "TC Wonderling Round" \
-  --text-font  "TC Jimmy Sans Pro" \
-  --chord-font "TC Jimmy Sans Pro"   # optional; omit to keep abcjs' chord font
+  --text-font  "TC Jimmy Serif Pro" \
+  --chord-font "TC Elderwick" --chord-weight bold   # omit chord opts for abcjs' default
 ```
 
-- `--title-font` — tune / cover / section titles.
-- `--text-font` — everything else written: body text, TOC, indexes, composer,
-  subtitle, source, `%%text` notes, lyrics. (Chord-chart grids stay monospace.)
-- `--chord-font` — chord symbols above the staff only; if omitted, abcjs' own
-  default font is used.
+- `--title-font` / `--title-weight` — tune / cover / section titles.
+- `--text-font` / `--text-weight` — everything else written: body text, TOC,
+  indexes, composer, subtitle, source, `%%text` notes, repeat endings, lyrics.
+  (Chord-chart grids stay monospace.)
+- `--chord-font` / `--chord-weight` — chord symbols above the staff only; if no
+  chord font is given, abcjs' own default is used.
 
-Each chosen font is located on disk and embedded in the PDF via `@font-face`, so
+A weight is a CSS weight (`bold`, `light`, `600`, …) and selects which face of
+the family to use. A font name may also include the weight directly, e.g.
+`--chord-font "TC Elderwick Bold"`.
+
+Each chosen face is located on disk and embedded in the PDF via `@font-face`, so
 it renders even if its license flags would otherwise stop Chromium embedding it
 (e.g. "Preview & Print" fonts) — and the PDF stays self-contained. Font lookup
 checks the standard macOS font folders.

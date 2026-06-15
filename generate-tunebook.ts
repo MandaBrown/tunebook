@@ -43,8 +43,11 @@ Options:
   --output PATH        Output PDF path (default: <OUTPUT_DIR>/<title>.pdf)
   --vault-dir PATH     Tune source directory (overrides VAULT_DIR / .env)
   --title-font NAME    Local font for titles (e.g. "TC Wonderling Round")
+  --title-weight W     Weight for the title font (e.g. bold, 600)
   --text-font NAME     Local font for body text / TOC / indexes / notes
+  --text-weight W      Weight for the text font
   --chord-font NAME    Local font for chord symbols above the staff (default: abcjs')
+  --chord-weight W     Weight for the chord font (e.g. bold)
   --no-cover           Omit the cover page
   --no-toc             Omit the table of contents
   --no-type-index      Omit the Index by Type
@@ -74,8 +77,10 @@ Examples:
   process.exit(0);
 }
 
-const { includeTags, excludeTags, title, outputPath: optOutput, vaultDir: optVaultDir, titleFont, textFont, chordFont, includeCover, includeToc, tocColumns } =
-  parseCommonArgs(args, "Vault Tunes");
+const { includeTags, excludeTags, title, outputPath: optOutput, vaultDir: optVaultDir,
+        titleFont, titleWeight, textFont, textWeight, chordFont, chordWeight,
+        includeCover, includeToc, tocColumns } = parseCommonArgs(args, "Vault Tunes");
+const fonts = { titleFont, titleWeight, textFont, textWeight, chordFont, chordWeight };
 
 // --vault-dir overrides the .env / env VAULT_DIR for this run.
 const ABC_DIR = path.join(optVaultDir ?? VAULT_DIR, "abc");
@@ -327,7 +332,7 @@ function buildHtml(): string {
 <head>
 <meta charset="UTF-8">
 <style>
-${commonStyles({ tocColumns, titleFont, textFont, chordFont })}
+${commonStyles({ tocColumns, ...fonts })}
 
   /* ── Tune pages ──
      The outer div has a FIXED height = page content area so the page-break
@@ -372,7 +377,7 @@ ${commonStyles({ tocColumns, titleFont, textFont, chordFont })}
   /* ── Chords-only pages ── */
   .tune-page.chords-only { display: block; }
   .cc-head { margin-bottom: 12pt; }
-  .cc-title { font-family: var(--title-font); font-size: 20pt; font-weight: bold; margin: 0; }
+  .cc-title { font-family: var(--title-font); font-weight: var(--title-weight); font-style: var(--title-style); font-size: 20pt; margin: 0; }
   .cc-composer { font-size: 11pt; font-style: italic; color: #555; margin-top: 2pt; }
   .cc-sub { font-size: 10pt; color: #777; margin-top: 2pt; }
   .chords-only .chord-chart {
@@ -422,7 +427,7 @@ ${includeAuthorIndex ? `
 
 <script>
 window.TUNE_DATA           = ${tuneDataJson};
-window.ABCJS_PARAMS        = ${abcjsParams({ titleFont, textFont, chordFont })};
+window.ABCJS_PARAMS        = ${abcjsParams(fonts)};
 window.PAGE_CONTENT_H      = ${PAGE_CONTENT_H};
 window.TUNE_MUSIC_H        = ${TUNE_MUSIC_H};
 window.INCLUDE_COVER       = ${includeCover};

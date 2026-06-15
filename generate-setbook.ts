@@ -62,8 +62,11 @@ Options:
   --output PATH        Output PDF path (default: <OUTPUT_DIR>/<title>.pdf)
   --vault-dir PATH     Tune source directory (overrides VAULT_DIR / .env)
   --title-font NAME    Local font for set titles
+  --title-weight W     Weight for the title font (e.g. bold, 600)
   --text-font NAME     Local font for body text / TOC / notes
+  --text-weight W      Weight for the text font
   --chord-font NAME    Local font for chord symbols above the staff (default: abcjs')
+  --chord-weight W     Weight for the chord font (e.g. bold)
   --no-cover           Omit the cover page
   --no-toc             Omit the table of contents
   --toc-columns N      Number of columns in the table of contents (default: 2)
@@ -95,8 +98,10 @@ Examples:
   process.exit(0);
 }
 
-const { includeTags, excludeTags, title, outputPath: optOutput, vaultDir: optVaultDir, titleFont, textFont, chordFont, includeCover, includeToc, tocColumns } =
-  parseCommonArgs(args, "Vault Sets");
+const { includeTags, excludeTags, title, outputPath: optOutput, vaultDir: optVaultDir,
+        titleFont, titleWeight, textFont, textWeight, chordFont, chordWeight,
+        includeCover, includeToc, tocColumns } = parseCommonArgs(args, "Vault Sets");
+const fonts = { titleFont, titleWeight, textFont, textWeight, chordFont, chordWeight };
 
 // --vault-dir overrides the .env / env VAULT_DIR for this run.
 const VAULT = optVaultDir ?? VAULT_DIR;
@@ -312,7 +317,7 @@ ${blocks}
 <head>
 <meta charset="UTF-8">
 <style>
-${commonStyles({ tocColumns, titleFont, textFont, chordFont })}
+${commonStyles({ tocColumns, ...fonts })}
 
   /* ── Set pages ──
      Each .set-page is a full page (height = PAGE_CONTENT_H). The .set-title
@@ -328,8 +333,9 @@ ${commonStyles({ tocColumns, titleFont, textFont, chordFont })}
   }
   .set-title {
     font-family: var(--title-font);
+    font-weight: var(--title-weight);
+    font-style: var(--title-style);
     font-size: 13pt;
-    font-weight: bold;
     color: #333;
     margin: 0 0 6pt;
     padding-bottom: 3pt;
@@ -369,7 +375,7 @@ ${setBlocks}
 
 <script>
 window.TUNE_DATA      = ${tuneDataJson};
-window.ABCJS_PARAMS   = ${abcjsParams({ titleFont, textFont, chordFont })};
+window.ABCJS_PARAMS   = ${abcjsParams(fonts)};
 window.PAGE_CONTENT_H = ${PAGE_CONTENT_H};
 window.SET_HEADER_H   = ${TUNE_HEADER_H + 8}; /* set-title + bottom margin */
 window.MIN_PAIR_SCALE = ${MIN_PAIR_SCALE};
