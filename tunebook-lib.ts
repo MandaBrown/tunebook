@@ -274,7 +274,7 @@ function weightToNumber(w: string): number {
 }
 
 export interface ResolvedFont { family: string; weight: number; italic: boolean; file: string | null; }
-interface FontFile { family: string; fullName: string; weight: number; italic: boolean; file: string; }
+interface FontFile { family: string; match: string[]; weight: number; italic: boolean; file: string; }
 let FONT_INDEX: FontFile[] | null = null;
 
 // Resolve a family name + optional requested weight to an actual installed face.
@@ -284,13 +284,12 @@ let FONT_INDEX: FontFile[] | null = null;
 function slotFont(name: string | null, weight: string | null): ResolvedFont | null {
   if (!name) return null;
   const want = name.trim().toLowerCase();
-  const cands = fontIndex().filter((f) => f.family.toLowerCase() === want || f.fullName.toLowerCase() === want);
+  const cands = fontIndex().filter((f) => f.match.includes(want));
   if (!cands.length) return { family: name, weight: weight ? weightToNumber(weight) : 400, italic: false, file: null };
   const desired = weight ? weightToNumber(weight) : null;
   const pick = desired != null
     ? cands.reduce((a, b) => Math.abs(b.weight - desired) < Math.abs(a.weight - desired) ? b : a)
-    : (cands.find((f) => f.fullName.toLowerCase() === want)
-        ?? cands.find((f) => f.weight === 400 && !f.italic) ?? cands[0]);
+    : (cands.find((f) => f.weight === 400 && !f.italic) ?? cands[0]);
   return { family: pick.family, weight: desired ?? pick.weight, italic: pick.italic, file: pick.file };
 }
 
@@ -342,8 +341,10 @@ export function abcjsParams(opts: FontOptions): string {
 // installed font we locate its file and inline it with @font-face, which is
 // treated as an author web font and always embeds.
 
-// Read the (typographic) family and subfamily from an sfnt 'name' table.
-function readFontNames(file: string): { family: string; subfamily: string } | null {
+// Read the family / subfamily names from an sfnt 'name' table. We keep both the
+// typographic (16/17) and WWS (1/2) variants so a face can be addressed either
+// by its plain family or by a full name like "… Print Extended Bold".
+function readFontNames(file: string): { family: string; subfamily: string; typoSub: string; wwsFamily: string } | null {
   let buf: Buffer;
   try { buf = fs.readFileSync(file); } catch { return null; }
   if (buf.length < 12) return null;
@@ -356,7 +357,7 @@ function readFontNames(file: string): { family: string; subfamily: string } | nu
   if (nameOff < 0 || nameOff + 6 > buf.length) return null;
   const count  = buf.readUInt16BE(nameOff + 2);
   const strOff = nameOff + buf.readUInt16BE(nameOff + 4);
-  let family = "", typoFamily = "", subfamily = "";
+  let wwsFamily = "", typoFamily = "", subfamily = "", typoSub = "";
   for (let i = 0; i < count; i++) {
     const r = nameOff + 6 + i * 12;
     if (r + 12 > buf.length) break;
@@ -368,11 +369,15 @@ function readFontNames(file: string): { family: string; subfamily: string } | nu
     // UTF-16BE (Windows/Unicode platforms) is ASCII-with-nulls for font names.
     const raw = buf.toString("latin1", off, off + len);
     const s = (platformID === 3 || platformID === 0) ? raw.replace(/ /g, "") : raw;
-    if      (nameID === 1  && !family)     family = s;
+    if      (nameID === 1  && !wwsFamily)  wwsFamily = s;
     else if (nameID === 16)                typoFamily = s;
     else if (nameID === 2  && !subfamily)  subfamily = s;
+    else if (nameID === 17 && !typoSub)    typoSub = s;
   }
-  return { family: (typoFamily || family).trim(), subfamily: subfamily.trim() };
+  return {
+    family: (typoFamily || wwsFamily).trim(), subfamily: subfamily.trim(),
+    typoSub: typoSub.trim(), wwsFamily: wwsFamily.trim(),
+  };
 }
 
 const FONT_DIRS = [
@@ -398,8 +403,15 @@ function fontIndex(): FontFile[] {
       const sub = n.subfamily.toLowerCase();
       const italic = /italic|oblique/.test(sub);
       const weight = weightToNumber(sub.replace(/italic|oblique/g, "").trim() || "regular");
-      const fullName = n.subfamily && !/^regular$/i.test(n.subfamily) ? `${n.family} ${n.subfamily}` : n.family;
-      idx.push({ family: n.family, fullName, weight, italic, file: p });
+      // Names this face can be addressed by: plain family, WWS family, and
+      // full names (family + sub / typographic sub) so weighted/width faces work.
+      const match = new Set<string>();
+      const add = (s: string) => { if (s && s.trim()) match.add(s.trim().toLowerCase()); };
+      const notReg = (x: string) => !!x && !/^regular$/i.test(x);
+      add(n.family); add(n.wwsFamily);
+      if (notReg(n.subfamily)) { add(`${n.family} ${n.subfamily}`); add(`${n.wwsFamily} ${n.subfamily}`); }
+      if (notReg(n.typoSub))   add(`${n.family} ${n.typoSub}`);
+      idx.push({ family: n.family, match: [...match], weight, italic, file: p });
     }
   }
   return (FONT_INDEX = idx);
