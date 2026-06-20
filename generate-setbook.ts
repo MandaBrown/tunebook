@@ -59,7 +59,10 @@ Options:
   --title TITLE        Title for cover, footer, and output filename (default: "Vault Sets")
   --include-tag TAG    Only include sets with this tag (repeatable; multiple = AND)
   --exclude-tag TAG    Exclude sets with this tag (repeatable)
-  --output PATH        Output PDF path (default: <OUTPUT_DIR>/<title>.pdf)
+  --output PATH        Output PDF path (default: <OUTPUT_DIR>/<title>.pdf).
+                       With --per-set, a directory to write the PDFs into.
+  --per-set            Write one PDF per set (named by set title) instead of a
+                       single book; no cover/TOC. Writes to --output or OUTPUT_DIR.
   --vault-dir PATH     Tune source directory (overrides VAULT_DIR / .env)
   --title-font NAME    Local font for set titles
   --title-weight W     Weight for the title font (e.g. bold, 600)
@@ -82,10 +85,13 @@ Set file format:
 
   Layout is controlled by bullet structure:
     - [[Tune]]            top-level link  = standalone tune (auto two-per-page)
+    - [[Tune]] (solo)     top-level link  = pinned to its own page (no pairing)
     - Group label         top-level text  = group header; the links indented
         - [[Tune A]]                        beneath it are forced onto one page
         - [[Tune B]]
             - a note text  indented text  = performance note on the tune above
+    ---                   horizontal rule = forced page break before the next
+                                            tune (it won't pair across the rule)
 
   Two standalone tunes share a page when both fit after shrinking by at most
   ${Math.round((1 - MIN_PAIR_SCALE) * 100)}%; otherwise each gets its own page. Grouped tunes always share a page.
@@ -110,6 +116,13 @@ const ABC_DIR  = path.join(VAULT, "abc");
 
 const outputPath = optOutput ?? path.join(OUTPUT_DIR, `${title}.pdf`);
 
+// --per-set writes one PDF per set instead of a single book. In that mode
+// --output (if given) names the destination directory, else OUTPUT_DIR is used.
+const perSet = args.includes("--per-set");
+const perSetDir = optOutput
+  ? (optOutput.toLowerCase().endsWith(".pdf") ? path.dirname(optOutput) : optOutput)
+  : OUTPUT_DIR;
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface TuneRef {
@@ -119,12 +132,15 @@ interface TuneRef {
 }
 
 // A page group is the unit of page layout. A group with `locked: true` came from
-// an explicit parent bullet in the set file and ALL its tunes are forced onto a
-// single page (scaled to fit). A `locked: false` group always holds exactly one
-// standalone tune and is eligible for the automatic two-per-page merge.
+// an explicit parent bullet in the set file (or a top-level "(solo)" tune) and
+// ALL its tunes are forced onto a single page (scaled to fit). A `locked: false`
+// group always holds exactly one standalone tune and is eligible for the
+// automatic two-per-page merge. `breakBefore` (from a "---" line) blocks the
+// merge pass from pairing this group with the one before it.
 interface PageGroup {
-  tunes:  TuneRef[];
-  locked: boolean;
+  tunes:       TuneRef[];
+  locked:      boolean;
+  breakBefore?: boolean;
 }
 
 interface SetRecord {
@@ -176,11 +192,16 @@ function parseSet(filepath: string): SetRecord | null {
   //                                              group that shares a single page.
   //   • indented LINK   ("\t- [[Tune]]")       → a tune inside the current group.
   //   • indented TEXT   ("\t- Sax solo")       → a performance note on the last tune.
+  //   • top-level RULE  ("---" / "- ---")       → a forced page break before the
+  //                                              next tune (no pairing across it).
+  //   • a top-level link tagged "(solo)" is pinned to its own page.
   const lineLinkRe = /!?\[\[([^\]]+)\]\]/;
+  const ruleRe     = /^-{3,}$/;  // applied after stripping an optional bullet marker
   const groups: PageGroup[] = [];
   let tuneIdx = 0;
   let currentGroup: PageGroup | null = null;  // active locked group, if any
   let currentTune:  TuneRef   | null = null;  // last tune added (notes attach here)
+  let pendingBreak = false;                   // a "---" seen; applies to next group
 
   const makeTune = (link: string): TuneRef | null => {
     const resolved = resolveWikilink(link);
@@ -190,23 +211,40 @@ function parseSet(filepath: string): SetRecord | null {
     return { renderId: `${setId}-t${tuneIdx++}`, abc, notes: [] };
   };
 
+  // Push a new group, applying (and clearing) any pending "---" page break.
+  const pushGroup = (g: PageGroup): PageGroup => {
+    if (pendingBreak) { g.breakBefore = true; pendingBreak = false; }
+    groups.push(g);
+    return g;
+  };
+
   for (const line of content.split(/\r?\n/)) {
     if (!line.trim()) continue;
+    const bare = line.replace(/^\s*(?:[-*+]\s+)?/, "").trim();
+
+    // A horizontal-rule line ("---" or "- ---") forces a break: the next tune
+    // starts a fresh page and won't be paired with the previous one.
+    if (ruleRe.test(bare)) {
+      pendingBreak = true;
+      currentGroup = null;
+      currentTune  = null;
+      continue;
+    }
+
     const isIndented = /^\s/.test(line);
     const linkMatch  = line.match(lineLinkRe);
 
     if (!isIndented) {
       if (linkMatch) {
-        // Standalone top-level tune → its own auto-mergeable group.
+        // Standalone top-level tune. A trailing "(solo)" locks it to its own page.
         currentGroup = null;
         currentTune  = null;
         const t = makeTune(linkMatch[1]);
-        if (t) { groups.push({ tunes: [t], locked: false }); currentTune = t; }
+        if (t) { pushGroup({ tunes: [t], locked: /\(solo\)/i.test(line) }); currentTune = t; }
       } else {
         // Plain-text parent bullet → start a locked group that shares a page.
-        currentGroup = { tunes: [], locked: true };
+        currentGroup = pushGroup({ tunes: [], locked: true });
         currentTune  = null;
-        groups.push(currentGroup);
       }
     } else if (linkMatch) {
       // Indented link → a tune. Belongs to the active locked group if there is
@@ -214,13 +252,12 @@ function parseSet(filepath: string): SetRecord | null {
       const t = makeTune(linkMatch[1]);
       if (t) {
         if (currentGroup) currentGroup.tunes.push(t);
-        else              groups.push({ tunes: [t], locked: false });
+        else              pushGroup({ tunes: [t], locked: false });
         currentTune = t;
       }
     } else if (currentTune) {
       // Indented text → a performance note on the most recent tune.
-      const note = line.replace(/^\s*(?:[-*+]\s+)?/, "").trim();
-      if (note) currentTune.notes.push(note);
+      if (bare) currentTune.notes.push(bare);
     }
   }
 
@@ -273,7 +310,12 @@ const renderTimestamp = makeRenderTimestamp();
 // with all their tunes already on one page and are skipped by the merge pass;
 // unlocked groups hold one tune and JS merges adjacent same-set ones where both
 // fit at MIN_PAIR_SCALE+.
-function buildHtml(): string {
+function buildHtml(
+  sets: SetRecord[],
+  bookTitle: string,
+  includeCover: boolean,
+  includeToc: boolean,
+): string {
   const tuneDataJson = JSON.stringify(
     Object.fromEntries(
       sets.flatMap((s) => s.groups.flatMap((g) => g.tunes.map((t) => [t.renderId, t.abc])))
@@ -299,9 +341,10 @@ function buildHtml(): string {
         .map((g, i) => {
           const sid         = i === 0 ? ` data-sid="${s.id}"` : "";
           const locked      = g.locked ? ` data-locked="1"` : "";
+          const brk         = g.breakBefore ? ` data-break-before="1"` : "";
           const labelSuffix = i === 0 ? "" : " (cont.)";
           const blocks      = g.tunes.map(tuneBlockHtml).join("\n");
-          return `<div class="set-page" data-set="${s.id}"${sid}${locked}>
+          return `<div class="set-page" data-set="${s.id}"${sid}${locked}${brk}>
   <div class="set-title">${esc(s.sortTitle)}${labelSuffix}</div>
   <div class="set-content">
 ${blocks}
@@ -353,21 +396,23 @@ ${commonStyles({ tocColumns, ...fonts })}
   .tune-block:last-child { margin-bottom: 0; }
   .tune-inner { width: 100%; }
   .tune-inner svg { width: 100% !important; height: auto !important; display: block; }
-  /* Performance notes from indented sub-bullets, printed beneath the tune. */
+  /* Performance notes from indented sub-bullets, printed beneath the tune.
+     Sized up and emphasised so they catch the eye during a set. */
   .tune-notes {
-    margin: 4pt 0 0;
+    margin: 6pt 0 0;
     padding-left: 18pt;
-    font-size: 9.5pt;
+    font-size: 13pt;
     line-height: 1.3;
-    color: #444;
+    color: #1a1a1a;
     font-style: italic;
+    font-weight: 600;
   }
-  .tune-notes li { margin: 1pt 0; }
+  .tune-notes li { margin: 2pt 0; }
 </style>
 </head>
 <body>
 
-${includeCover ? coverPageHtml(title, `Rendered on ${renderTimestamp}`) : ""}
+${includeCover ? coverPageHtml(bookTitle, `Rendered on ${renderTimestamp}`) : ""}
 
 ${includeToc ? tocSectionHtml(sets.map((s) => ({ id: s.id, label: s.sortTitle }))) : ""}
 
@@ -444,6 +489,8 @@ const BROWSER_SCRIPT = `
       if (nxt.getAttribute('data-set') !== setId) { i++; continue; }
       // Never merge across an explicit (locked) group; it owns its page.
       if (cur.getAttribute('data-locked') || nxt.getAttribute('data-locked')) { i++; continue; }
+      // Never merge across an explicit "---" page break.
+      if (nxt.getAttribute('data-break-before')) { i++; continue; }
       // Only merge if both currently hold exactly one tune-block.
       var curBlocks = cur.querySelectorAll('.tune-block');
       var nxtBlocks = nxt.querySelectorAll('.tune-block');
@@ -544,28 +591,45 @@ async function main() {
 
   const abcjsPath = resolveAbcjsPath(__dirname);
 
-  const result = await renderToPdf({
-    html:            buildHtml(),
-    browserScript:   BROWSER_SCRIPT,
-    outputPath,
-    title,
-    renderTimestamp,
-    abcjsPath,
-    textFont,
-  });
+  // Render a list of sets into one PDF (with outlines), returning its size in KB.
+  async function renderSets(
+    setsArg: SetRecord[], outPath: string, bookTitle: string,
+    withCover: boolean, withToc: boolean,
+  ): Promise<number> {
+    const { pages, firstSetPg } = await renderToPdf({
+      html:            buildHtml(setsArg, bookTitle, withCover, withToc),
+      browserScript:   BROWSER_SCRIPT,
+      outputPath:      outPath,
+      title:           bookTitle,
+      renderTimestamp,
+      abcjsPath,
+      textFont,
+    });
+    const tocPage = withCover ? 2 : 1;
+    const outlineEntries: OutlineEntry[] = [
+      ...(withToc ? [{ title: "Table of Contents", page: tocPage }] : []),
+      ...setsArg.map((s) => ({ title: s.sortTitle, page: pages[s.id] ?? firstSetPg })),
+    ];
+    await addOutlines(outPath, outlineEntries);
+    return Math.round(fs.statSync(outPath).size / 1024);
+  }
 
-  const { pages, firstSetPg } = result;
+  // One file per set: no cover or TOC (each set's title is already its header).
+  if (perSet) {
+    fs.mkdirSync(perSetDir, { recursive: true });
+    for (const s of sets) {
+      const safe = s.sortTitle.replace(/[\\/:*?"<>|]+/g, "-").trim();
+      const out  = path.join(perSetDir, `${safe}.pdf`);
+      const kb   = await renderSets([s], out, s.sortTitle, false, false);
+      console.log(`  ${out} (${kb} KB)`);
+    }
+    console.log(`Done! ${sets.length} per-set PDF(s) written to: ${perSetDir}`);
+    return;
+  }
 
   console.log("Adding PDF outlines...");
-  const tocPage = includeCover ? 2 : 1;
-  const outlineEntries: OutlineEntry[] = [
-    ...(includeToc ? [{ title: "Table of Contents", page: tocPage }] : []),
-    ...sets.map((s) => ({ title: s.sortTitle, page: pages[s.id] ?? firstSetPg })),
-  ];
-  await addOutlines(outputPath, outlineEntries);
-
-  const sizeKb = Math.round(fs.statSync(outputPath).size / 1024);
-  console.log(`Done! PDF written to: ${outputPath} (${sizeKb} KB)`);
+  const kb = await renderSets(sets, outputPath, title, includeCover, includeToc);
+  console.log(`Done! PDF written to: ${outputPath} (${kb} KB)`);
 }
 
 main().catch((err) => {

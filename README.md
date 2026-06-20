@@ -131,7 +131,35 @@ note printed under that tune:
     - [[The Judge (harmony)]]
 ```
 
+### Controlling page breaks in a set
+
+Two adjacent standalone tunes are paired onto one page automatically when both
+fit. To override that:
+
+- **Group onto one page** — a plain-text parent bullet (as above) forces all the
+  links indented beneath it onto a single page.
+- **Pin a tune to its own page** — add `(solo)` to a top-level link; it never
+  pairs with a neighbour.
+- **Force a break** — a horizontal rule (`---`) on its own line breaks the page
+  there; tunes won't pair across it.
+
+```md
+- [[abc/Reel A]]
+- [[abc/Reel B]] (solo)     ← always alone on its page
+---                         ← hard page break
+- [[abc/Reel C]]
+- [[abc/Reel D]]            ← C and D may still pair
+```
+
 ## Output
 
 PDFs are written to `OUTPUT_DIR` as `<title>.pdf` (e.g. `Vault Tunes.pdf`), or to
 the exact path given with `--output`.
+
+`generate-setbook.ts --per-set` instead writes one PDF per set, each named after
+the set and containing just that set (no cover or table of contents). They go to
+`OUTPUT_DIR`, or to the directory given with `--output`:
+
+```sh
+npx tsx generate-setbook.ts --include-tag Rufous --per-set --output ~/set-sheets
+```
