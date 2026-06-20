@@ -5,9 +5,11 @@ printable PDF books — full tunebooks, chord-chart editions, and setlists.
 
 | Script | What it makes |
 |--------|---------------|
-| `generate-tunebook.ts` | A book of every tune (one per page), sorted, with a table of contents and indexes. Optional chord charts under each tune, or a chords-only edition. |
+| `generate-tunebook.ts` | A book of every tune (one per page), sorted, with a table of contents and indexes. Optional chord charts and/or a movable-do solfège line under each tune, or a chords-only edition. |
+| `generate-tune.ts`     | A one-tune PDF from a single ABC/markdown file. Same text/chord/solfège options as the tunebook, no cover or indexes. |
 | `generate-setbook.ts`  | A book built from `sets/` files — up to two tunes per page where they fit, with explicit grouping and per-tune performance notes. |
 | `chord-chart.ts`       | Standalone ABC → chord-chart converter. Importable, and runnable on its own. |
+| `solfege.ts`           | Standalone ABC → solfège annotator: adds a movable-do `w:` lyric line (do = the tonic) under each staff. Importable, and runnable on its own. |
 | `tunebook-lib.ts`      | Shared layout, PDF, and rendering helpers. |
 
 ## Requirements
@@ -89,17 +91,41 @@ npx tsx generate-tunebook.ts --chords
 # Chords-only edition (title/composer/key + chart, no staff)
 npx tsx generate-tunebook.ts --chords-only --title "Vault Tunes Chords"
 
+# …with a movable-do solfège line under each staff (do = the tonic)
+npx tsx generate-tunebook.ts --solfege --title "Vault Tunes (Solfège)"
+
+# Only certain genres (repeatable; multiple genres are OR'd)
+npx tsx generate-tunebook.ts --genre Irish --genre Scottish --title "Trad"
+
+# A single tune to its own PDF (same options)
+npx tsx generate-tune.ts "$VAULT_DIR/abc/Abe's Retreat.md" --solfege
+
 # Setbook for one tag
 npx tsx generate-setbook.ts --include-tag Rufous --exclude-tag NeedsABC --title "Rufous Sets"
 
-# Just print one tune's chord chart to the terminal
+# Just print one tune's chord chart, or its solfège, to the terminal
 npx tsx chord-chart.ts "$VAULT_DIR/abc/Kelly Peck's.md"
+npx tsx solfege.ts "$VAULT_DIR/abc/Abe's Retreat.md"
 ```
 
 Shared options (both generators): `--title`, `--include-tag` / `--exclude-tag`
 (repeatable), `--output PATH`, `--no-cover`, `--no-toc`, `--toc-columns N`.
-`generate-tunebook.ts` adds `--chords`, `--chords-only`, `--no-type-index`,
-`--no-author-index`; `generate-setbook.ts` reads its layout from the set files.
+`generate-tunebook.ts` adds `--chords`, `--chords-only`, `--solfege`,
+`--genre` / `--exclude-genre`, `--type` / `--exclude-type`, `--by-type`,
+`--no-type-index`, `--no-author-index`; `generate-tune.ts` takes one tune file
+plus the font/`--chords`/`--solfege` options; `generate-setbook.ts` reads its
+layout from the set files.
+
+### Solfège
+
+`--solfege` (and the standalone `solfege.ts`) writes a movable-do solfège
+syllable under every note, with **do = the tonic**, so the syllables read as
+scale degrees in any key or mode (D dorian → `do re me fa sol la te`). Chromatic
+notes use the usual raised/lowered spellings (`di ri fi si li` / `ra me se le
+te`). Because solfège syllables need room under each note, a dense line is
+re-broken at its barlines onto shorter staff lines so the lyrics fit and every
+line still justifies to the full width — a fix that lives in the ABC itself, so
+it renders evenly in other ABC apps too.
 
 ## Data format
 

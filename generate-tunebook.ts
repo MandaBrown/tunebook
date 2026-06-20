@@ -24,6 +24,7 @@ import {
   OutlineEntry,
 } from "./tunebook-lib.js";
 import { abcToChordChart, ChordChart } from "./chord-chart.js";
+import { abcToSolfege } from "./solfege.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -56,8 +57,13 @@ Options:
   --chords             Print a chord chart below each tune that has chords
   --chords-only        Print only chord charts (title/composer/key, no staff);
                        tunes without chords are skipped
+  --solfege            Print a movable-do solfège line under each staff
+                       (do = the tonic, so D dorian reads do re me fa sol la te)
   --type TYPE          Only include tunes whose Type is TYPE (repeatable; "none" = untyped)
   --exclude-type TYPE  Exclude tunes whose Type is TYPE (repeatable; "none" = untyped)
+  --genre GENRE        Only include tunes with this Genre (repeatable; multiple = OR;
+                       "none" = tunes with no Genre)
+  --exclude-genre GENRE  Exclude tunes with this Genre (repeatable; "none" = no Genre)
   --by-type            Emit one book per type family (Reels, Jigs, Marches &
                        Waltzes, Other, Untyped) instead of a single combined book
   -h, --help           Show this help message
@@ -73,6 +79,8 @@ Examples:
   tsx generate-tunebook.ts --include-tag Rufous --include-tag set --output ~/manda-general-knowledge-vault/Rufous\\ Sets.pdf
   tsx generate-tunebook.ts --chords --include-tag Rufous
   tsx generate-tunebook.ts --chords-only --title "Rufous Chord Charts"
+  tsx generate-tunebook.ts --solfege --title "Vault Tunes (Solfège)"
+  tsx generate-tunebook.ts --genre Irish --genre Scottish --title "Trad"
 `.trim());
   process.exit(0);
 }
@@ -89,14 +97,19 @@ const includeTypeIndex   = !args.includes("--no-type-index");
 const includeAuthorIndex = !args.includes("--no-author-index");
 const chordsOnly         = args.includes("--chords-only");
 const includeChords      = chordsOnly || args.includes("--chords");
+const includeSolfege     = args.includes("--solfege");
 
 // Type filters (the Type frontmatter field; "none" matches untyped tunes).
 const byType       = args.includes("--by-type");
 const typeFilters: string[] = [];
 const excludeTypes: string[] = [];
+const genreFilters: string[] = [];
+const excludeGenres: string[] = [];
 for (let i = 0; i < args.length; i++) {
-  if      (args[i] === "--type"         && args[i + 1]) typeFilters.push(args[++i]);
-  else if (args[i] === "--exclude-type" && args[i + 1]) excludeTypes.push(args[++i]);
+  if      (args[i] === "--type"          && args[i + 1]) typeFilters.push(args[++i]);
+  else if (args[i] === "--exclude-type"  && args[i + 1]) excludeTypes.push(args[++i]);
+  else if (args[i] === "--genre"         && args[i + 1]) genreFilters.push(args[++i]);
+  else if (args[i] === "--exclude-genre" && args[i + 1]) excludeGenres.push(args[++i]);
 }
 
 const outputPath = optOutput ?? path.join(OUTPUT_DIR, `${title}.pdf`);
@@ -139,6 +152,7 @@ interface Tune {
   type: string;
   composer: string;
   tags: string[];
+  genres: string[];
   abc: string;         // full cleaned ABC (used for chords-only charts)
   abcChunks: string[]; // one chunk per page, split at %%newpage
 }
@@ -170,10 +184,11 @@ function parseTune(filepath: string): Tune | null {
   const composerAbcMatch = abc.match(/^C:\s*(.+)/m);
   const composer = composerFm || (composerAbcMatch ? composerAbcMatch[1].trim() : "");
   const tags = toStringArray(data["tags"]);
+  const genres = toStringArray(data["Genre"]);
   const id = "tune-" + slugify(filename);
   const abcChunks = splitAbcByNewpage(abc);
 
-  return { id, filename, displayTitle, sortTitle, keys, type, composer, tags, abc, abcChunks };
+  return { id, filename, displayTitle, sortTitle, keys, type, composer, tags, genres, abc, abcChunks };
 }
 
 // ── Load & filter tunes ───────────────────────────────────────────────────────
@@ -197,6 +212,17 @@ if (typeFilters.length > 0)
   tunes = tunes.filter((t) => typeFilters.some((v) => matchesType(t, v)));
 if (excludeTypes.length > 0)
   tunes = tunes.filter((t) => !excludeTypes.some((v) => matchesType(t, v)));
+
+// Genre filters: a tune may carry several Genre values; "none" matches a tune
+// with no Genre. Multiple --genre flags are OR'd (keep a tune in any of them).
+const matchesGenre = (t: Tune, v: string) =>
+  v.toLowerCase() === "none"
+    ? t.genres.length === 0
+    : t.genres.some((g) => g.toLowerCase() === v.toLowerCase());
+if (genreFilters.length > 0)
+  tunes = tunes.filter((t) => genreFilters.some((v) => matchesGenre(t, v)));
+if (excludeGenres.length > 0)
+  tunes = tunes.filter((t) => !excludeGenres.some((v) => matchesGenre(t, v)));
 
 if (tunes.length === 0) {
   console.log("No tunes matched the filters; nothing to generate.");
@@ -223,7 +249,10 @@ if (chordsOnly && tunes.length === 0) {
   process.exit(1);
 }
 
-console.log(`Processing ${tunes.length} tunes${chordsOnly ? " (chords only)" : includeChords ? " (with chords)" : ""}...`);
+const modeNotes = chordsOnly
+  ? ["chords only"]
+  : [includeChords ? "with chords" : "", includeSolfege ? "with solfège" : ""].filter(Boolean);
+console.log(`Processing ${tunes.length} tunes${modeNotes.length ? ` (${modeNotes.join(", ")})` : ""}...`);
 
 // ── Build indexes ─────────────────────────────────────────────────────────────
 
@@ -257,12 +286,13 @@ function buildHtml(): string {
   // Each chunk gets its own page; the first chunk's render id == tune.id so the
   // existing TOC/index hrefs (#tune-id) still scroll to the tune. In chords-only
   // mode nothing is rendered with abcjs, so TUNE_DATA is empty.
+  const prepChunk = (abc: string) => (includeSolfege ? abcToSolfege(abc) : abc);
   const tuneDataJson = JSON.stringify(
     chordsOnly
       ? {}
       : Object.fromEntries(
           tunes.flatMap((t) =>
-            t.abcChunks.map((abc, i) => [chunkRenderId(t.id, i), abc])
+            t.abcChunks.map((abc, i) => [chunkRenderId(t.id, i), prepChunk(abc)])
           )
         )
   );
