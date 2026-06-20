@@ -401,11 +401,11 @@ ${commonStyles({ tocColumns, ...fonts })}
   .tune-notes {
     margin: 6pt 0 0;
     padding-left: 18pt;
-    font-size: 13pt;
+    font-size: 16pt;
     line-height: 1.3;
-    color: #1a1a1a;
-    font-style: italic;
-    font-weight: 600;
+    color: #1a5fb4;
+    font-style: normal;
+    font-weight: normal;
   }
   .tune-notes li { margin: 2pt 0; }
 </style>
